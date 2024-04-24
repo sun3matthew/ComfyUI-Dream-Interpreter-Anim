@@ -17,7 +17,7 @@ class Visualizer {
         const iframeDocument = this.iframe.contentWindow.document;
         const previewScript = iframeDocument.getElementById('visualizer');
         previewScript.setAttribute("hdri_image", JSON.stringify(params.hdri_image));
-        previewScript.setAttribute("dream_interpretation", JSON.stringify(params.dream_interpretation));
+        previewScript.setAttribute("dream_interpretation", "");
         // Update the reference image and depth map
     }
 
@@ -122,7 +122,7 @@ function createVisualizer(node, inputName, typeName, inputData, app) {
 
 function registerVisualizer(nodeType, nodeData, nodeClassName, typeName) {
     if (nodeData.name == nodeClassName) {
-        console.log("[3D Visualizer] Registering node: " + nodeData.name)
+        console.log("[3D Visualizer] Registering node: " + nodeData.name + " with type: " + typeName)
 
         const onNodeCreated = nodeType.prototype.onNodeCreated
 
@@ -148,10 +148,9 @@ function registerVisualizer(nodeType, nodeData, nodeClassName, typeName) {
         nodeType.prototype.onExecuted = async function(message) { 
             // Check if reference image and depth map are available
             console.log(message)
-            if (message.dream_interpretation && message.hdri_image) {
+            if (message.hdri_image) {
                 const params = {}
                 params.hdri_image = message.hdri_image[0];
-                params.dream_interpretation = message.dream_interpretation[0];
                 this.updateParameters(params);
             }
                 

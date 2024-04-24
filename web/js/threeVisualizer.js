@@ -2,8 +2,6 @@ import * as THREE from 'three';
 import { api } from '../../../scripts/api.js';
 
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
-import { FontLoader } from 'three/addons/loaders/FontLoader.js'; // Import FontLoader
 import * as dat from 'three/addons/libs/lil-gui.module.min'
 
 
@@ -14,18 +12,20 @@ const progressIndicator = document.getElementById("progress-indicator");
 
 const gui = new dat.GUI({ width: 150 });
 const fov = 75;
+let fpsSet = 8;
 const params = {
-    showText: true,
-    fov: fov
+    fov: fov,
+    fps: fpsSet
   };
   
-gui.add(params, 'showText').name('Show Text').onChange((value) => {
-textMesh.visible = value;
-});
 
 gui.add(params, 'fov', 10, 120).name('Zoom').step(0.1).onChange(function () {
     camera.fov = params.fov;
     camera.updateProjectionMatrix();
+});
+
+gui.add(params, 'fps', 1, 60).name('FPS').step(1).onChange(function () {
+    fpsSet = params.fps;
 });
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, extensions: {
@@ -56,6 +56,8 @@ controls.update();
 controls.enablePan = true;
 controls.enableDamping = true;
 
+let textureList = [];
+
 // Handle window resize event
 window.onresize = function () {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -65,20 +67,34 @@ window.onresize = function () {
 };
 
 var lastHdriImage = "";
-var lastDreamInterpretation = "";
 var needUpdate = false;
+let frameCounter = 0;
+let time = Date.now();
+let fps = 8;
 
 function frameUpdate() {
     var hdriImage = visualizer.getAttribute("hdri_image");
-    var dreamInterpretation = visualizer.getAttribute("dream_interpretation");
-    if (textMesh) {
-        // Make the text face the camera
-        textMesh.lookAt(camera.position);
-    }
-    if (hdriImage == lastHdriImage && dreamInterpretation == lastDreamInterpretation) {
+    if (hdriImage == lastHdriImage) {
         if (needUpdate) {
             controls.update();
             renderer.render(scene, camera);
+
+            if (textureList.length != 0 && textureList.length != 1) {
+
+                let maxFrameCounter = textureList.length;
+
+                // Frame counter
+                let currentTime = Date.now();
+                let newFrameCounter = currentTime - time;
+                // to int
+                newFrameCounter = Math.floor(newFrameCounter * fpsSet / 1000);
+                newFrameCounter = newFrameCounter % maxFrameCounter;
+                if (newFrameCounter != frameCounter) {
+                    frameCounter = newFrameCounter;
+                    scene.environment = textureList[frameCounter];
+                    scene.background = textureList[frameCounter];
+                }
+            }
         }
         requestAnimationFrame(frameUpdate);
     
@@ -87,23 +103,37 @@ function frameUpdate() {
         scene.clear();
         progressDialog.open = true;
         lastHdriImage = hdriImage;
-        lastDreamInterpretation = dreamInterpretation;
-        main(JSON.parse(lastHdriImage), lastDreamInterpretation);
+        main(JSON.parse(lastHdriImage));
     }
 }
 
-let textMesh;
-async function main(hdriImageParams, dreamInterpretation) {
+async function main(hdriImageParams) {
     let hdriTexture;
-    console.log(hdriImageParams, dreamInterpretation);
+    console.log(hdriImageParams);
     if (hdriImageParams?.filename) {
+        textureList = [];
+
+        const filename = hdriImageParams.filename;
+        // dreamsave_00028.png
+        // find "dreamsave_"
+        let fileNumber = filename.slice(filename.lastIndexOf("_") + 1, filename.lastIndexOf("."));
+        let fileInt = parseInt(fileNumber);
+
         const hdriImageUrl = api.apiURL('/view?' + new URLSearchParams(hdriImageParams)).replace(/extensions.*\//, "");
-        const hdriImageExt = hdriImageParams.filename.slice(hdriImageParams.filename.lastIndexOf(".") + 1);
         const hdriLoader = new THREE.TextureLoader();
         hdriTexture = await hdriLoader.loadAsync(hdriImageUrl);
-        console.log(hdriTexture);
         hdriTexture.mapping = THREE.EquirectangularReflectionMapping;
         hdriTexture.colorSpace = THREE.SRGBColorSpace;
+
+        for (let i = 0; i < fileInt; i++) {
+            let newFileNumber = i.toString().padStart(5, '0');
+            hdriImageParams.filename = `dreamsave_${newFileNumber}.png`;
+            const hdriImageUrl2 = api.apiURL('/view?' + new URLSearchParams(hdriImageParams)).replace(/extensions.*\//, "");
+            hdriTexture = await hdriLoader.loadAsync(hdriImageUrl2);
+            hdriTexture.mapping = THREE.EquirectangularReflectionMapping;
+            hdriTexture.colorSpace = THREE.SRGBColorSpace;
+            textureList.push(hdriTexture);
+        }
     }
 
     if (hdriTexture) {
@@ -111,48 +141,8 @@ async function main(hdriImageParams, dreamInterpretation) {
         scene.background = hdriTexture;
     }
    
-    // Use the imported FontLoader here
-    const fontLoader = new FontLoader();
-    fontLoader.load('https://threejs.org/examples/fonts/helvetiker_regular.typeface.json', function (font) {
-    // Function to split the text into lines after every 10 words
-    function splitTextIntoLines(text, wordsPerLine) {
-        const words = text.replace(/"\s*"/g, '').split(' ');
-        let result = '';
-
-        for (let i = 0; i < words.length; i += wordsPerLine) {
-            const line = words.slice(i, i + wordsPerLine).join(' ');
-            result += i + wordsPerLine < words.length ? line + '\n' : line;
-        }
-
-        return result;
-    }
-
-    // Using the function to process your text
-    const processedText = splitTextIntoLines(dreamInterpretation, 10);
-    
-    const textGeometry = new TextGeometry(processedText, {
-        font: font,
-        size: 0.5,
-        height: 0.1,
-        curveSegments: 12
-    });
-
-    textGeometry.computeBoundingBox();
-
-    const textWidth = textGeometry.boundingBox.max.x - textGeometry.boundingBox.min.x;
-    const textHeight = textGeometry.boundingBox.max.y - textGeometry.boundingBox.min.y;
-
-    const textMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    textMesh = new THREE.Mesh(textGeometry, textMaterial);
-
-    // Center the text mesh
-    textMesh.position.x = -0.5 * textWidth;
-    textMesh.position.y = -0.5 * textHeight;
-    textMesh.position.z = 0;
-
-    scene.add(textMesh);
-    });
     needUpdate = true;
+    time = Date.now();
 
     // Assume ambientLight and camera have been defined somewhere above this snippet
     scene.add(ambientLight);
